@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+axios.defaults.baseURL = 'https://barber-crown-apii.onrender.com';
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const adminStyles = `

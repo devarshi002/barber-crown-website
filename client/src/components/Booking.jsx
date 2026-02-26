@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+
+axios.defaults.baseURL = 'https://barber-crown-apii.onrender.com';
 import { useReveal } from '../hooks/useReveal';
 
 const services = [
