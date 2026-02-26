@@ -60,8 +60,8 @@ npm run dev
 ```
 
 This starts:
-- **React client** → http://localhost:3000
-- **Node server** → http://localhost:5000
+- **React client** → [click me](https://barber-crown-website.vercel.app/)
+- 
 
 ---
 
