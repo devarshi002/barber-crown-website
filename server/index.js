@@ -5,11 +5,24 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { body, validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
+const { MongoClient } = require('mongodb');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const bookings = [];
+// ─── MongoDB Connection ───────────────────────────────────────────────────────
+let db;
+async function connectDB() {
+  try {
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+    db = client.db('bladecrown');
+    console.log('✅ MongoDB connected!');
+  } catch (err) {
+    console.error('❌ MongoDB connection error:', err.message);
+    process.exit(1);
+  }
+}
 
 app.use(helmet());
 app.use(morgan('dev'));
@@ -17,11 +30,10 @@ app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000', creden
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ─── Send Email via Brevo HTTP API (No SMTP — works on Render free plan) ──────
+// ─── Send Email via Brevo HTTP API ───────────────────────────────────────────
 async function sendEmail(to, subject, html) {
   if (!process.env.BREVO_API_KEY) {
-    console.log('📧 Brevo API key not configured — skipping email');
-    console.log(`   To: ${to} | Subject: ${subject}`);
+    console.log('📧 Brevo not configured — skipping');
     return;
   }
   try {
@@ -109,14 +121,14 @@ function paymentConfirmEmailHTML(booking) {
     <div style="text-align:center;margin-bottom:28px;">
       <div style="font-size:3rem;margin-bottom:12px;">💰</div>
       <h2 style="color:#2ecc71;font-size:1.5rem;margin-bottom:8px;">Payment Confirmed!</h2>
-      <p style="color:#aaa;font-size:0.88rem;">Your payment of <strong style="color:#C9A84C;">$${booking.amount}</strong> has been received by our team.</p>
+      <p style="color:#aaa;font-size:0.88rem;">Your payment of <strong style="color:#C9A84C;">$${booking.amount}</strong> has been received.</p>
     </div>
     <div style="background:#1A1A1A;border:1px solid rgba(46,204,113,0.2);padding:24px;margin-bottom:24px;">
       <table style="width:100%;border-collapse:collapse;">
         ${[['Booking ID',`#${booking.id.slice(0,8).toUpperCase()}`],['Name',booking.name],['Service',booking.service],['Barber',booking.barber||'No Preference'],['Date',booking.date],['Time',booking.time],['Amount Paid',`$${booking.amount}`],['Status','✅ Payment Confirmed']].map(([k,v])=>`<tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:10px 0;color:#888;font-size:0.82rem;width:40%;">${k}</td><td style="padding:10px 0;color:#F5EDD6;font-size:0.88rem;font-weight:600;">${v}</td></tr>`).join('')}
       </table>
     </div>
-    <div style="background:#1A1A1A;border:1px solid rgba(201,168,76,0.1);padding:20px;text-align:center;margin-bottom:28px;">
+    <div style="background:#1A1A1A;border:1px solid rgba(201,168,76,0.1);padding:20px;text-align:center;">
       <p style="color:#888;font-size:0.8rem;margin:0 0 8px;">📍 42 Crown Street, New York, NY 10001</p>
       <p style="color:#888;font-size:0.8rem;margin:0;">📞 +1 (212) 555-BLADE</p>
     </div>
@@ -128,18 +140,20 @@ function paymentConfirmEmailHTML(booking) {
 
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 
-// Health check
-app.get('/api/health', (req, res) => {
-  const totalRevenue = bookings.filter(b=>b.paymentStatus==='paid').reduce((s,b)=>s+(b.amount||0),0);
-  res.json({ status:'ok', service:'Blade & Crown API', timestamp:new Date().toISOString(), totalBookings:bookings.length, totalRevenue });
+app.get('/api/health', async (req, res) => {
+  const bookings = db.collection('bookings');
+  const total = await bookings.countDocuments();
+  const paid = await bookings.find({ paymentStatus: 'paid' }).toArray();
+  const totalRevenue = paid.reduce((s, b) => s + (b.amount || 0), 0);
+  res.json({ status: 'ok', service: 'Blade & Crown API', timestamp: new Date().toISOString(), totalBookings: total, totalRevenue });
 });
 
-// Get all bookings
-app.get('/api/bookings', (req, res) => {
+app.get('/api/bookings', async (req, res) => {
+  const col = db.collection('bookings');
+  const bookings = await col.find().sort({ createdAt: -1 }).toArray();
   res.json({ count: bookings.length, bookings });
 });
 
-// Create booking
 app.post('/api/bookings',
   [
     body('name').trim().notEmpty().withMessage('Name is required').isLength({ max: 100 }),
@@ -156,15 +170,15 @@ app.post('/api/bookings',
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ success:false, message:errors.array()[0].msg, errors:errors.array() });
+      return res.status(400).json({ success: false, message: errors.array()[0].msg });
     }
 
     const { name, email, phone, service, barber, date, time, notes, amount, paymentStatus } = req.body;
 
     const bookingDate = new Date(date);
-    const today = new Date(); today.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
     if (bookingDate < today) {
-      return res.status(400).json({ success:false, message:'Booking date cannot be in the past.' });
+      return res.status(400).json({ success: false, message: 'Booking date cannot be in the past.' });
     }
 
     const booking = {
@@ -181,13 +195,13 @@ app.post('/api/bookings',
       createdAt: new Date().toISOString(),
     };
 
-    bookings.push(booking);
+    await db.collection('bookings').insertOne(booking);
 
     console.log(`\n📋 New Booking: ${booking.id}`);
     console.log(`   Client  : ${name} <${email}>`);
     console.log(`   Service : ${service} | ${date} at ${time}`);
     console.log(`   Barber  : ${barber || 'No Preference'}`);
-    console.log(`   Amount  : $${amount||'—'} | Payment: ${booking.paymentStatus}\n`);
+    console.log(`   Amount  : $${amount || '—'} | Payment: ${booking.paymentStatus}\n`);
 
     Promise.all([
       sendEmail(email, `✅ Booking Confirmed — Blade & Crown`, customerEmailHTML(booking)),
@@ -199,83 +213,82 @@ app.post('/api/bookings',
     res.status(201).json({
       success: true,
       message: 'Booking confirmed successfully!',
-      booking: { id:booking.id, name, service, date, time, amount:booking.amount, paymentStatus:booking.paymentStatus, status:booking.status, createdAt:booking.createdAt },
+      booking: { id: booking.id, name, service, date, time, amount: booking.amount, paymentStatus: booking.paymentStatus, status: booking.status, createdAt: booking.createdAt },
     });
   }
 );
 
-// ─── Mark booking as PAID ─────────────────────────────────────────────────────
-app.patch('/api/bookings/:id/pay', (req, res) => {
-  const booking = bookings.find(b => b.id === req.params.id);
-  if (!booking) return res.status(404).json({ success:false, message:'Booking not found' });
-  if (booking.paymentStatus === 'paid') return res.status(400).json({ success:false, message:'Already marked as paid' });
+app.patch('/api/bookings/:id/pay', async (req, res) => {
+  const col = db.collection('bookings');
+  const booking = await col.findOne({ id: req.params.id });
+  if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+  if (booking.paymentStatus === 'paid') return res.status(400).json({ success: false, message: 'Already marked as paid' });
 
-  booking.paymentStatus = 'paid';
-  booking.paidAt = new Date().toISOString();
+  const paidAt = new Date().toISOString();
+  await col.updateOne({ id: req.params.id }, { $set: { paymentStatus: 'paid', paidAt } });
+
+  const updated = { ...booking, paymentStatus: 'paid', paidAt };
 
   console.log(`\n💰 Payment Marked!`);
   console.log(`   Client  : ${booking.name}`);
   console.log(`   Service : ${booking.service}`);
-  console.log(`   Barber  : ${booking.barber || 'No Preference'}`);
   console.log(`   Amount  : $${booking.amount}`);
-  console.log(`   Paid At : ${booking.paidAt}\n`);
+  console.log(`   Paid At : ${paidAt}\n`);
 
-  // Send payment confirmation email to customer
-  if (booking.email && booking.email !== '***') {
-    sendEmail(booking.email, `💰 Payment Confirmed — Blade & Crown`, paymentConfirmEmailHTML(booking)).catch(console.error);
+  if (booking.email) {
+    sendEmail(booking.email, `💰 Payment Confirmed — Blade & Crown`, paymentConfirmEmailHTML(updated)).catch(console.error);
   }
 
-  res.json({ success:true, message:`Payment of $${booking.amount} confirmed for ${booking.name}`, booking });
+  res.json({ success: true, message: `Payment of $${booking.amount} confirmed for ${booking.name}`, booking: updated });
 });
 
-// ─── Cancel / delete booking ──────────────────────────────────────────────────
-app.delete('/api/bookings/:id', (req, res) => {
-  const idx = bookings.findIndex(b => b.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ success:false, message:'Booking not found' });
-  const cancelled = bookings.splice(idx, 1)[0];
-  console.log(`\n🗑️  Cancelled: ${cancelled.name} — ${cancelled.service}\n`);
-  res.json({ success:true, message:'Booking cancelled', id:cancelled.id });
+app.delete('/api/bookings/:id', async (req, res) => {
+  const col = db.collection('bookings');
+  const booking = await col.findOne({ id: req.params.id });
+  if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+  await col.deleteOne({ id: req.params.id });
+  console.log(`\n🗑️  Cancelled: ${booking.name} — ${booking.service}\n`);
+  res.json({ success: true, message: 'Booking cancelled', id: req.params.id });
 });
 
-// ─── Revenue summary ──────────────────────────────────────────────────────────
-app.get('/api/revenue', (req, res) => {
-  const paid = bookings.filter(b => b.paymentStatus === 'paid');
-  const total = paid.reduce((s,b) => s+(b.amount||0), 0);
+app.get('/api/revenue', async (req, res) => {
+  const paid = await db.collection('bookings').find({ paymentStatus: 'paid' }).toArray();
+  const total = paid.reduce((s, b) => s + (b.amount || 0), 0);
   const byBarber = {};
   const byService = {};
   paid.forEach(b => {
     const barber = b.barber || 'No Preference';
-    byBarber[barber] = (byBarber[barber]||0) + (b.amount||0);
+    byBarber[barber] = (byBarber[barber] || 0) + (b.amount || 0);
     const svc = b.service?.split(' — ')[0] || b.service;
-    byService[svc] = (byService[svc]||0) + (b.amount||0);
+    byService[svc] = (byService[svc] || 0) + (b.amount || 0);
   });
-  res.json({ total, paidCount:paid.length, pendingCount:bookings.filter(b=>b.paymentStatus!=='paid').length, byBarber, byService });
+  const pendingCount = await db.collection('bookings').countDocuments({ paymentStatus: { $ne: 'paid' } });
+  res.json({ total, paidCount: paid.length, pendingCount, byBarber, byService });
 });
 
-// ─── Availability ─────────────────────────────────────────────────────────────
-app.get('/api/availability', (req, res) => {
+app.get('/api/availability', async (req, res) => {
   const { date } = req.query;
-  if (!date) return res.status(400).json({ message:'Date is required' });
+  if (!date) return res.status(400).json({ message: 'Date is required' });
   const allSlots = ['9:00 AM','9:30 AM','10:00 AM','10:30 AM','11:00 AM','11:30 AM','12:00 PM','1:00 PM','1:30 PM','2:00 PM','2:30 PM','3:00 PM','3:30 PM','4:00 PM','4:30 PM','5:00 PM','5:30 PM','6:00 PM','6:30 PM','7:00 PM'];
-  const bookedSlots = bookings.filter(b => b.date === date).map(b => b.time);
-  res.json({ date, available:allSlots.filter(s=>!bookedSlots.includes(s)), booked:bookedSlots });
+  const booked = await db.collection('bookings').find({ date }).toArray();
+  const bookedSlots = booked.map(b => b.time);
+  res.json({ date, available: allSlots.filter(s => !bookedSlots.includes(s)), booked: bookedSlots });
 });
 
-// 404
-app.use((req, res) => res.status(404).json({ message:'Route not found' }));
-
-// Error
-app.use((err, req, res, next) => { console.error(err.stack); res.status(500).json({ message:'Internal server error' }); });
+app.use((req, res) => res.status(404).json({ message: 'Route not found' }));
+app.use((err, req, res, next) => { console.error(err.stack); res.status(500).json({ message: 'Internal server error' }); });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n🪒  Blade & Crown API → http://localhost:${PORT}`);
-  console.log(`\n📋  Endpoints:`);
-  console.log(`    GET    /api/health`);
-  console.log(`    GET    /api/bookings`);
-  console.log(`    POST   /api/bookings`);
-  console.log(`    PATCH  /api/bookings/:id/pay   ← NEW: Mark as Paid`);
-  console.log(`    DELETE /api/bookings/:id`);
-  console.log(`    GET    /api/revenue             ← NEW: Revenue Summary`);
-  console.log(`    GET    /api/availability?date=YYYY-MM-DD\n`);
+connectDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`\n🪒  Blade & Crown API → http://localhost:${PORT}`);
+    console.log(`\n📋  Endpoints:`);
+    console.log(`    GET    /api/health`);
+    console.log(`    GET    /api/bookings`);
+    console.log(`    POST   /api/bookings`);
+    console.log(`    PATCH  /api/bookings/:id/pay`);
+    console.log(`    DELETE /api/bookings/:id`);
+    console.log(`    GET    /api/revenue`);
+    console.log(`    GET    /api/availability?date=YYYY-MM-DD\n`);
+  });
 });
