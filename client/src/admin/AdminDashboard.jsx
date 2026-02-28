@@ -917,7 +917,9 @@ function BookingsTable({ bookings, onDelete, onMarkPaid, markingPaid, compact = 
                     </button>
                   )}
                   {b.paymentStatus !== 'cancelled' && (
-                    <button className="btn-sm btn-danger" onClick={() => onDelete(b)}>✕</button>
+                    b.paymentStatus === 'paid'
+                      ? <span title="Cannot cancel a paid booking" style={{ fontSize:'0.6rem', color:'#444', letterSpacing:'0.08em', border:'1px solid #2a2a2a', padding:'4px 8px', cursor:'not-allowed' }}>🔒 PAID</span>
+                      : <button className="btn-sm btn-danger" onClick={() => onDelete(b)}>✕ Cancel</button>
                   )}
                   {b.paymentStatus === 'cancelled' && (
                     <span style={{ fontSize: '0.62rem', color: '#444', letterSpacing: '0.1em' }}>—</span>
