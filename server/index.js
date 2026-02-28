@@ -6,6 +6,8 @@ const morgan = require('morgan');
 const { body, validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
 const { MongoClient } = require('mongodb');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -22,6 +24,61 @@ async function connectDB() {
     console.error('❌ MongoDB connection error:', err.message);
     process.exit(1);
   }
+}
+
+// ─── OTP Store (in-memory, expires in 5 min) ─────────────────────────────────
+const otpStore = {}; // { mobile: { otp, expiresAt, attempts } }
+
+// ─── Auth Middleware ──────────────────────────────────────────────────────────
+function requireAuth(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1] || req.cookies?.adminToken;
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'bladecrown2026supersecretkey');
+    req.admin = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ success: false, message: 'Invalid or expired token' });
+  }
+}
+
+// ─── Send OTP via Fast2SMS ────────────────────────────────────────────────────
+async function sendOTP(mobile, otp) {
+  const https = require('https');
+  const message = `Your Blade & Crown Admin OTP is: ${otp}. Valid for 5 minutes. Do not share.`;
+  const params = new URLSearchParams({
+    route: 'q',
+    message,
+    numbers: mobile,
+    flash: '0',
+  });
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'www.fast2sms.com',
+      path: `/dev/bulkV2?${params}`,
+      method: 'GET',
+      headers: {
+        authorization: process.env.FAST2SMS_API_KEY,
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.return === true) {
+            console.log(`✅ OTP sent to +91${mobile}`);
+            resolve(json);
+          } else {
+            console.error('❌ Fast2SMS error:', json);
+            reject(new Error(JSON.stringify(json)));
+          }
+        } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 app.use(helmet());
@@ -188,7 +245,7 @@ app.get('/api/health', async (req, res) => {
   res.json({ status: 'ok', service: 'Blade & Crown API', timestamp: new Date().toISOString(), totalBookings: total, totalRevenue });
 });
 
-app.get('/api/bookings', async (req, res) => {
+app.get('/api/bookings', requireAuth, async (req, res) => {
   const col = db.collection('bookings');
   const bookings = await col.find().sort({ createdAt: -1 }).toArray();
   res.json({ count: bookings.length, bookings });
@@ -241,7 +298,8 @@ app.post('/api/bookings',
     console.log(`   Client  : ${name} <${email}>`);
     console.log(`   Service : ${service} | ${date} at ${time}`);
     console.log(`   Barber  : ${barber || 'No Preference'}`);
-    console.log(`   Amount  : $${amount || '—'} | Payment: ${booking.paymentStatus}\n`);
+    console.log(`   Amount  : $${amount || '—'} | Payment: ${booking.paymentStatus}`);
+    console.log(`   Email stored: [${booking.email}]\n`);
 
     Promise.all([
       sendEmail(email, `✅ Booking Confirmed — Blade & Crown`, customerEmailHTML(booking)),
@@ -258,7 +316,7 @@ app.post('/api/bookings',
   }
 );
 
-app.patch('/api/bookings/:id/pay', async (req, res) => {
+app.patch('/api/bookings/:id/pay', requireAuth, async (req, res) => {
   const col = db.collection('bookings');
   const booking = await col.findOne({ id: req.params.id });
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
@@ -283,14 +341,15 @@ app.patch('/api/bookings/:id/pay', async (req, res) => {
   res.json({ success: true, message: `Payment of $${booking.amount} confirmed for ${booking.name}`, booking: updated });
 });
 
-app.delete('/api/bookings/:id', async (req, res) => {
+app.delete('/api/bookings/:id', requireAuth, async (req, res) => {
   const col = db.collection('bookings');
   const booking = await col.findOne({ id: req.params.id });
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
   await col.deleteOne({ id: req.params.id });
 
   console.log(`\n🗑️  Cancelled: ${booking.name} — ${booking.service}`);
-  console.log(`   Email   : ${booking.email}`);
+  console.log(`   Email   : [${booking.email}]`);
+  console.log(`   Email check: ${!!booking.email} | length: ${(booking.email||'').length}`);
   console.log(`   Date    : ${booking.date} at ${booking.time}\n`);
 
   // Send emails — await both so errors are visible in logs
@@ -327,7 +386,7 @@ app.delete('/api/bookings/:id', async (req, res) => {
   res.json({ success: true, message: 'Booking cancelled', id: req.params.id });
 });
 
-app.get('/api/revenue', async (req, res) => {
+app.get('/api/revenue', requireAuth, async (req, res) => {
   const paid = await db.collection('bookings').find({ paymentStatus: 'paid' }).toArray();
   const total = paid.reduce((s, b) => s + (b.amount || 0), 0);
   const byBarber = {};

@@ -6,6 +6,187 @@ if (process.env.NODE_ENV === 'production') {
   axios.defaults.baseURL = 'https://barber-crown-apii.onrender.com';
 }
 
+// ─── Auth Token Helpers ───────────────────────────────────────────────────────
+const getToken = () => localStorage.getItem('adminToken');
+const setToken = (t) => localStorage.setItem('adminToken', t);
+const clearToken = () => localStorage.removeItem('adminToken');
+
+if (getToken()) axios.defaults.headers.common['Authorization'] = `Bearer ${getToken()}`;
+
+// ─── Admin Login Page ─────────────────────────────────────────────────────────
+function AdminLogin({ onLogin }) {
+  const [step, setStep] = React.useState('credentials'); // credentials | otp
+  const [username, setUsername] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [otp, setOtp] = React.useState('');
+  const [status, setStatus] = React.useState('idle'); // idle | loading | error | success
+  const [errorMsg, setErrorMsg] = React.useState('');
+  const [showPass, setShowPass] = React.useState(false);
+  const [timer, setTimer] = React.useState(300); // 5 min countdown
+
+  React.useEffect(() => {
+    if (step !== 'otp') return;
+    const interval = setInterval(() => {
+      setTimer(t => {
+        if (t <= 1) { clearInterval(interval); setStep('credentials'); setErrorMsg('OTP expired. Please login again.'); setStatus('error'); return 0; }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [step]);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!username || !password) { setErrorMsg('Please enter username and password'); setStatus('error'); return; }
+    setStatus('loading');
+    try {
+      await axios.post('/api/auth/login', { username, password });
+      setStep('otp');
+      setTimer(300);
+      setStatus('idle');
+      setErrorMsg('');
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg(err.response?.data?.message || 'Login failed');
+    }
+  };
+
+  const handleOTP = async (e) => {
+    e.preventDefault();
+    if (otp.length !== 6) { setErrorMsg('Enter 6-digit OTP'); setStatus('error'); return; }
+    setStatus('loading');
+    try {
+      const res = await axios.post('/api/auth/verify-otp', { otp });
+      setToken(res.data.token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`;
+      setStatus('success');
+      setTimeout(() => onLogin(), 800);
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg(err.response?.data?.message || 'Invalid OTP');
+    }
+  };
+
+  const fmt = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
+
+  return (
+    <div style={{ minHeight:'100vh', background:'#080808', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'Montserrat,sans-serif', position:'relative', overflow:'hidden' }}>
+      {/* Background */}
+      <div style={{ position:'absolute', inset:0, background:'radial-gradient(ellipse at 20% 50%, rgba(201,168,76,0.04) 0%, transparent 60%), radial-gradient(ellipse at 80% 50%, rgba(139,26,26,0.06) 0%, transparent 60%)' }}/>
+      <div style={{ position:'absolute', top:'10%', left:'5%', width:300, height:300, border:'1px solid rgba(201,168,76,0.04)', borderRadius:'50%' }}/>
+      <div style={{ position:'absolute', bottom:'10%', right:'5%', width:200, height:200, border:'1px solid rgba(201,168,76,0.04)', borderRadius:'50%' }}/>
+
+      <div style={{ width:'100%', maxWidth:420, padding:'0 24px', position:'relative', zIndex:1 }}>
+        {/* Logo */}
+        <div style={{ textAlign:'center', marginBottom:40 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:16, marginBottom:12 }}>
+            <div style={{ height:1, width:40, background:'linear-gradient(90deg,transparent,rgba(201,168,76,0.5))' }}/>
+            <span style={{ fontSize:'1.8rem' }}>💈</span>
+            <div style={{ height:1, width:40, background:'linear-gradient(90deg,rgba(201,168,76,0.5),transparent)' }}/>
+          </div>
+          <h1 style={{ fontFamily:"'Playfair Display',serif", fontSize:'1.8rem', fontWeight:900, letterSpacing:'0.1em', color:'#F5EDD6', margin:'0 0 4px' }}>BLADE & CROWN</h1>
+          <p style={{ fontSize:'0.6rem', letterSpacing:'0.3em', color:'#555', margin:0 }}>ADMIN PORTAL</p>
+        </div>
+
+        {/* Card */}
+        <div style={{ background:'#0d0d0d', border:'1px solid rgba(201,168,76,0.15)', padding:'40px 36px', position:'relative' }}>
+          <div style={{ position:'absolute', top:0, left:0, width:30, height:30, borderTop:'2px solid #C9A84C', borderLeft:'2px solid #C9A84C' }}/>
+          <div style={{ position:'absolute', bottom:0, right:0, width:30, height:30, borderBottom:'2px solid #C9A84C', borderRight:'2px solid #C9A84C' }}/>
+
+          {/* Step indicators */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8, marginBottom:28 }}>
+            {['credentials','otp'].map((s,i) => (
+              <React.Fragment key={s}>
+                <div style={{ width:28, height:28, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.65rem', fontWeight:700,
+                  background: step === s ? '#C9A84C' : (step === 'otp' && s === 'credentials') ? 'rgba(201,168,76,0.2)' : 'rgba(255,255,255,0.05)',
+                  color: step === s ? '#000' : '#555', border: step === s ? 'none' : '1px solid rgba(201,168,76,0.2)' }}>
+                  {step === 'otp' && s === 'credentials' ? '✓' : i+1}
+                </div>
+                {i === 0 && <div style={{ height:1, width:40, background: step === 'otp' ? '#C9A84C' : 'rgba(201,168,76,0.2)' }}/>}
+              </React.Fragment>
+            ))}
+          </div>
+
+          {step === 'credentials' ? (
+            <form onSubmit={handleLogin}>
+              <h2 style={{ fontSize:'1rem', fontWeight:700, letterSpacing:'0.1em', color:'#F5EDD6', margin:'0 0 6px', textAlign:'center' }}>SIGN IN</h2>
+              <p style={{ fontSize:'0.68rem', color:'#555', textAlign:'center', marginBottom:24 }}>Enter your admin credentials</p>
+
+              <div style={{ marginBottom:16 }}>
+                <label style={{ display:'block', fontSize:'0.58rem', letterSpacing:'0.2em', color:'#C9A84C', marginBottom:8, textTransform:'uppercase' }}>Username</label>
+                <input value={username} onChange={e => setUsername(e.target.value)}
+                  placeholder="admin username"
+                  style={{ width:'100%', background:'#080808', border:'1px solid rgba(201,168,76,0.2)', color:'#F5EDD6', padding:'12px 14px', fontFamily:'Montserrat,sans-serif', fontSize:'0.82rem', outline:'none', boxSizing:'border-box', transition:'border 0.2s' }}
+                  onFocus={e => e.target.style.borderColor='rgba(201,168,76,0.6)'}
+                  onBlur={e => e.target.style.borderColor='rgba(201,168,76,0.2)'}
+                />
+              </div>
+
+              <div style={{ marginBottom:20 }}>
+                <label style={{ display:'block', fontSize:'0.58rem', letterSpacing:'0.2em', color:'#C9A84C', marginBottom:8, textTransform:'uppercase' }}>Password</label>
+                <div style={{ position:'relative' }}>
+                  <input value={password} onChange={e => setPassword(e.target.value)}
+                    type={showPass ? 'text' : 'password'} placeholder="••••••••••"
+                    style={{ width:'100%', background:'#080808', border:'1px solid rgba(201,168,76,0.2)', color:'#F5EDD6', padding:'12px 40px 12px 14px', fontFamily:'Montserrat,sans-serif', fontSize:'0.82rem', outline:'none', boxSizing:'border-box' }}
+                    onFocus={e => e.target.style.borderColor='rgba(201,168,76,0.6)'}
+                    onBlur={e => e.target.style.borderColor='rgba(201,168,76,0.2)'}
+                  />
+                  <button type="button" onClick={() => setShowPass(s=>!s)}
+                    style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', color:'#555', cursor:'pointer', fontSize:'0.8rem' }}>
+                    {showPass ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
+
+              {status === 'error' && <div style={{ background:'rgba(139,26,26,0.2)', border:'1px solid rgba(139,26,26,0.4)', padding:'10px 14px', marginBottom:16, fontSize:'0.72rem', color:'#e06060' }}>⚠️ {errorMsg}</div>}
+
+              <button type="submit" disabled={status==='loading'}
+                style={{ width:'100%', padding:'14px', background:'linear-gradient(135deg,#C9A84C,#a8873d)', color:'#000', fontFamily:'Montserrat,sans-serif', fontWeight:700, fontSize:'0.7rem', letterSpacing:'0.2em', border:'none', cursor:'pointer', opacity: status==='loading' ? 0.7 : 1 }}>
+                {status === 'loading' ? 'SENDING OTP...' : 'CONTINUE →'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleOTP}>
+              <h2 style={{ fontSize:'1rem', fontWeight:700, letterSpacing:'0.1em', color:'#F5EDD6', margin:'0 0 6px', textAlign:'center' }}>VERIFY OTP</h2>
+              <p style={{ fontSize:'0.68rem', color:'#555', textAlign:'center', marginBottom:6 }}>6-digit OTP sent to your registered mobile</p>
+              <p style={{ fontSize:'0.72rem', color: timer < 60 ? '#e06060' : '#C9A84C', textAlign:'center', marginBottom:24, fontWeight:700 }}>
+                ⏱ Expires in {fmt(timer)}
+              </p>
+
+              <div style={{ marginBottom:20 }}>
+                <label style={{ display:'block', fontSize:'0.58rem', letterSpacing:'0.2em', color:'#C9A84C', marginBottom:8, textTransform:'uppercase' }}>Enter OTP</label>
+                <input value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g,'').slice(0,6))}
+                  placeholder="000000" maxLength={6}
+                  style={{ width:'100%', background:'#080808', border:'1px solid rgba(201,168,76,0.3)', color:'#C9A84C', padding:'16px 14px', fontFamily:'Montserrat,sans-serif', fontSize:'1.6rem', letterSpacing:'0.4em', outline:'none', boxSizing:'border-box', textAlign:'center' }}
+                  onFocus={e => e.target.style.borderColor='#C9A84C'}
+                  onBlur={e => e.target.style.borderColor='rgba(201,168,76,0.3)'}
+                />
+              </div>
+
+              {status === 'error' && <div style={{ background:'rgba(139,26,26,0.2)', border:'1px solid rgba(139,26,26,0.4)', padding:'10px 14px', marginBottom:16, fontSize:'0.72rem', color:'#e06060' }}>⚠️ {errorMsg}</div>}
+              {status === 'success' && <div style={{ background:'rgba(46,204,113,0.1)', border:'1px solid rgba(46,204,113,0.3)', padding:'10px 14px', marginBottom:16, fontSize:'0.72rem', color:'#2ecc71', textAlign:'center' }}>✅ Login successful! Redirecting...</div>}
+
+              <button type="submit" disabled={status==='loading'||status==='success'}
+                style={{ width:'100%', padding:'14px', background:'linear-gradient(135deg,#C9A84C,#a8873d)', color:'#000', fontFamily:'Montserrat,sans-serif', fontWeight:700, fontSize:'0.7rem', letterSpacing:'0.2em', border:'none', cursor:'pointer', marginBottom:12, opacity: status==='loading' ? 0.7 : 1 }}>
+                {status === 'loading' ? 'VERIFYING...' : '✓ VERIFY & LOGIN'}
+              </button>
+
+              <button type="button" onClick={() => { setStep('credentials'); setOtp(''); setStatus('idle'); setErrorMsg(''); }}
+                style={{ width:'100%', padding:'10px', background:'transparent', color:'#555', fontFamily:'Montserrat,sans-serif', fontSize:'0.65rem', letterSpacing:'0.15em', border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer' }}>
+                ← BACK TO LOGIN
+              </button>
+            </form>
+          )}
+        </div>
+
+        <p style={{ textAlign:'center', fontSize:'0.6rem', color:'#333', marginTop:20, letterSpacing:'0.1em' }}>
+          © {new Date().getFullYear()} BLADE & CROWN · SECURE ADMIN ACCESS
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const adminStyles = `
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Bebas+Neue&family=Montserrat:wght@300;400;500;600&display=swap');
@@ -386,8 +567,33 @@ function MarkPaidModal({ booking, onConfirm, onCancel }) {
   );
 }
 
+// ─── Main Admin Dashboard Wrapper (with Auth) ────────────────────────────────
+export default function AdminApp() {
+  const [isLoggedIn, setIsLoggedIn] = React.useState(false);
+  const [checking, setChecking] = React.useState(true);
+
+  React.useEffect(() => {
+    const token = getToken();
+    if (!token) { setChecking(false); return; }
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    axios.get('/api/auth/verify')
+      .then(() => setIsLoggedIn(true))
+      .catch(() => { clearToken(); setIsLoggedIn(false); })
+      .finally(() => setChecking(false));
+  }, []);
+
+  if (checking) return (
+    <div style={{ minHeight:'100vh', background:'#080808', display:'flex', alignItems:'center', justifyContent:'center', color:'#C9A84C', fontFamily:'Montserrat,sans-serif', fontSize:'0.8rem', letterSpacing:'0.2em' }}>
+      LOADING...
+    </div>
+  );
+
+  if (!isLoggedIn) return <AdminLogin onLogin={() => setIsLoggedIn(true)} />;
+  return <AdminDashboard onLogout={() => { clearToken(); delete axios.defaults.headers.common['Authorization']; setIsLoggedIn(false); }} />;
+}
+
 // ─── Main Admin Dashboard ─────────────────────────────────────────────────────
-export default function AdminDashboard() {
+function AdminDashboard({ onLogout }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
