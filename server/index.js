@@ -237,6 +237,77 @@ function cancellationEmailHTML(booking) {
 
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 
+// ─── AUTH ROUTES ─────────────────────────────────────────────────────────────
+
+// Step 1: Username + Password → Send OTP
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ success: false, message: 'Username and password required' });
+
+  if (username !== process.env.ADMIN_USERNAME || password !== process.env.ADMIN_PASSWORD) {
+    console.log(`❌ Failed login: ${username}`);
+    return res.status(401).json({ success: false, message: 'Invalid username or password' });
+  }
+
+  const otp = crypto.randomInt(100000, 999999).toString();
+  const mobile = process.env.ADMIN_MOBILE;
+  otpStore[mobile] = { otp, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 };
+  console.log(`🔐 Login OK for ${username} → OTP: ${otp} → sending to +91${mobile}`);
+
+  try {
+    await sendOTP(mobile, otp);
+    res.json({ success: true, message: 'OTP sent to your registered mobile number' });
+  } catch (err) {
+    console.error('❌ OTP failed:', err.message);
+    // Dev fallback — show OTP in response
+    res.json({ success: true, message: 'OTP send failed — check logs', devOtp: otp });
+  }
+});
+
+// Step 2: Verify OTP → JWT Token
+app.post('/api/auth/verify-otp', (req, res) => {
+  const { otp } = req.body;
+  const mobile = process.env.ADMIN_MOBILE;
+  const record = otpStore[mobile];
+
+  if (!record) return res.status(400).json({ success: false, message: 'No OTP requested. Please login first.' });
+  if (Date.now() > record.expiresAt) {
+    delete otpStore[mobile];
+    return res.status(400).json({ success: false, message: 'OTP expired. Please login again.' });
+  }
+
+  record.attempts++;
+  if (record.attempts > 5) {
+    delete otpStore[mobile];
+    return res.status(429).json({ success: false, message: 'Too many attempts. Please login again.' });
+  }
+
+  if (otp !== record.otp) {
+    return res.status(401).json({ success: false, message: `Invalid OTP. ${5 - record.attempts} attempts remaining.` });
+  }
+
+  delete otpStore[mobile];
+  const token = jwt.sign(
+    { username: process.env.ADMIN_USERNAME, role: 'admin' },
+    process.env.JWT_SECRET || 'bladecrown2026supersecretkey',
+    { expiresIn: '24h' }
+  );
+  console.log(`✅ Admin logged in!`);
+  res.json({ success: true, message: 'Login successful!', token });
+});
+
+// Verify token
+app.get('/api/auth/verify', requireAuth, (req, res) => {
+  res.json({ success: true, admin: req.admin });
+});
+
+// Logout
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  console.log('👋 Admin logged out');
+  res.json({ success: true, message: 'Logged out' });
+});
+
+// ─── Health check
 app.get('/api/health', async (req, res) => {
   const bookings = db.collection('bookings');
   const total = await bookings.countDocuments();
