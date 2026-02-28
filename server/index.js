@@ -138,6 +138,46 @@ function paymentConfirmEmailHTML(booking) {
   </div>`;
 }
 
+
+function cancellationEmailHTML(booking) {
+  const rows = [
+    ['Booking ID', '#' + booking.id.slice(0,8).toUpperCase()],
+    ['Name', booking.name],
+    ['Service', booking.service],
+    ['Barber', booking.barber || 'No Preference'],
+    ['Date', booking.date],
+    ['Time', booking.time],
+    ['Status', '❌ Cancelled'],
+  ].map(([k,v]) => `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:10px 0;color:#888;font-size:0.82rem;width:40%;">${k}</td><td style="padding:10px 0;color:#F5EDD6;font-size:0.88rem;font-weight:600;">${v}</td></tr>`).join('');
+
+  return `<div style="font-family:'Segoe UI',sans-serif;background:#0A0A0A;color:#F5EDD6;padding:40px;max-width:600px;margin:0 auto;">
+    <div style="text-align:center;border-bottom:1px solid rgba(201,168,76,0.3);padding-bottom:30px;margin-bottom:30px;">
+      <h1 style="font-size:2rem;letter-spacing:0.15em;color:#C9A84C;margin:0;">BLADE <span style="color:#555">&</span> CROWN</h1>
+      <p style="color:#888;font-size:0.8rem;letter-spacing:0.2em;margin-top:8px;">PREMIUM BARBERSHOP</p>
+    </div>
+    <div style="text-align:center;margin-bottom:28px;">
+      <div style="font-size:3rem;margin-bottom:12px;">❌</div>
+      <h2 style="color:#e06060;font-size:1.5rem;margin-bottom:8px;">Booking Cancelled</h2>
+      <p style="color:#aaa;font-size:0.88rem;">Your appointment has been cancelled by our team.</p>
+    </div>
+    <div style="background:#1A1A1A;border:1px solid rgba(139,26,26,0.3);padding:24px;margin-bottom:24px;">
+      <table style="width:100%;border-collapse:collapse;">${rows}</table>
+    </div>
+    <div style="background:#160e0e;border:1px solid rgba(139,26,26,0.2);padding:18px 20px;margin-bottom:24px;text-align:center;">
+      <p style="color:#aaa;font-size:0.82rem;margin:0 0 10px;">Would you like to reschedule?</p>
+      <p style="color:#C9A84C;font-size:0.85rem;font-weight:600;margin:0;">📞 +1 (212) 555-BLADE</p>
+    </div>
+    <div style="background:#1A1A1A;border:1px solid rgba(201,168,76,0.1);padding:20px;text-align:center;margin-bottom:28px;">
+      <p style="color:#888;font-size:0.8rem;margin:0 0 8px;">📍 42 Crown Street, New York, NY 10001</p>
+      <p style="color:#888;font-size:0.8rem;margin:0;">📞 +1 (212) 555-BLADE</p>
+    </div>
+    <p style="color:#666;font-size:0.76rem;text-align:center;line-height:1.7;">We apologize for any inconvenience. We hope to serve you soon!</p>
+    <div style="text-align:center;margin-top:30px;padding-top:24px;border-top:1px solid rgba(201,168,76,0.1);">
+      <p style="color:#444;font-size:0.7rem;letter-spacing:0.15em;">© ${new Date().getFullYear()} BLADE & CROWN · EST. 1998</p>
+    </div>
+  </div>`;
+}
+
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 
 app.get('/api/health', async (req, res) => {
@@ -248,7 +288,36 @@ app.delete('/api/bookings/:id', async (req, res) => {
   const booking = await col.findOne({ id: req.params.id });
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
   await col.deleteOne({ id: req.params.id });
-  console.log(`\n🗑️  Cancelled: ${booking.name} — ${booking.service}\n`);
+
+  console.log(`\n🗑️  Cancelled: ${booking.name} — ${booking.service}`);
+  console.log(`   Client  : ${booking.email}`);
+  console.log(`   Date    : ${booking.date} at ${booking.time}\n`);
+
+  // Send cancellation email to customer
+  if (booking.email) {
+    sendEmail(
+      booking.email,
+      `❌ Booking Cancelled — Blade & Crown`,
+      cancellationEmailHTML(booking)
+    ).catch(console.error);
+  }
+
+  // Notify business owner too
+  if (process.env.BUSINESS_EMAIL) {
+    sendEmail(
+      process.env.BUSINESS_EMAIL,
+      `🗑️ Booking Cancelled: ${booking.name} — ${booking.service}`,
+      `<div style="font-family:sans-serif;padding:24px;">
+        <h2 style="color:#e06060;">Booking Cancelled</h2>
+        <p><b>Client:</b> ${booking.name} (${booking.email})</p>
+        <p><b>Service:</b> ${booking.service}</p>
+        <p><b>Date:</b> ${booking.date} at ${booking.time}</p>
+        <p><b>Barber:</b> ${booking.barber || 'No Preference'}</p>
+        <p style="color:#888;font-size:0.85rem;">Cancelled at: ${new Date().toLocaleString()}</p>
+      </div>`
+    ).catch(console.error);
+  }
+
   res.json({ success: true, message: 'Booking cancelled', id: req.params.id });
 });
 
