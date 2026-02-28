@@ -153,6 +153,42 @@ const adminStyles = `
   .sidebar-link:hover { color: #C9A84C; background: rgba(201,168,76,0.04); border-left-color: rgba(201,168,76,0.3); }
   .sidebar-link.active { color: #C9A84C; background: rgba(201,168,76,0.07); border-left-color: #C9A84C; }
 
+  .hamburger {
+    display: none;
+    background: none;
+    border: 1px solid rgba(201,168,76,0.3);
+    color: #C9A84C;
+    padding: 8px 10px;
+    cursor: none;
+    font-size: 1.1rem;
+    line-height: 1;
+    transition: background 0.2s;
+  }
+  .hamburger:hover { background: rgba(201,168,76,0.1); }
+  .sidebar-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 9;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+  }
+
+  @media (max-width: 768px) {
+    .hamburger { display: block; }
+    .sidebar-overlay.open { display: block; }
+    .admin-sidebar {
+      transform: translateX(-100%);
+      transition: transform 0.3s ease;
+    }
+    .admin-sidebar.open {
+      transform: translateX(0);
+    }
+    .admin-main {
+      margin-left: 0 !important;
+    }
+    .admin-topbar-title h1 { font-size: 1rem !important; }
+    .stats-grid { grid-template-columns: 1fr 1fr !important; }
+  }
+
   .modal-overlay {
     position: fixed; inset: 0; z-index: 999;
     background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
@@ -364,6 +400,7 @@ export default function AdminDashboard() {
   const [markingPaid, setMarkingPaid] = useState(null);
   const [notification, setNotification] = useState(null);
   const [activeSection, setActiveSection] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const showNotif = (msg, type = 'success') => {
     setNotification({ msg, type });
@@ -506,7 +543,10 @@ export default function AdminDashboard() {
       <div style={{ display: 'flex', minHeight: '100vh', background: '#080808' }}>
 
         {/* ─── SIDEBAR ─────────────────────────────────────────────────────── */}
-        <div style={{ width: 220, background: '#0d0d0d', borderRight: '1px solid rgba(201,168,76,0.1)', display: 'flex', flexDirection: 'column', position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 10 }}>
+        {/* Mobile overlay */}
+        <div className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`} onClick={() => setSidebarOpen(false)} />
+
+        <div className={`admin-sidebar ${sidebarOpen ? 'open' : ''}`} style={{ width: 220, background: '#0d0d0d', borderRight: '1px solid rgba(201,168,76,0.1)', display: 'flex', flexDirection: 'column', position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 10 }}>
           {/* Logo */}
           <div style={{ padding: '24px 20px', borderBottom: '1px solid rgba(201,168,76,0.1)' }}>
             <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: '1.4rem', letterSpacing: '0.1em', lineHeight: 1.1 }}>
@@ -528,7 +568,7 @@ export default function AdminDashboard() {
               <div
                 key={item.id}
                 className={`sidebar-link ${activeSection === item.id ? 'active' : ''}`}
-                onClick={() => setActiveSection(item.id)}
+                onClick={() => { setActiveSection(item.id); setSidebarOpen(false); }}
               >
                 <span>{item.icon}</span>
                 <span>{item.label}</span>
@@ -551,11 +591,12 @@ export default function AdminDashboard() {
         </div>
 
         {/* ─── MAIN CONTENT ─────────────────────────────────────────────── */}
-        <div style={{ marginLeft: 220, flex: 1, overflow: 'auto' }}>
+        <div className="admin-main" style={{ marginLeft: 220, flex: 1, overflow: 'auto' }}>
 
           {/* Top bar */}
           <div style={{ background: '#0d0d0d', borderBottom: '1px solid rgba(201,168,76,0.1)', padding: '0 32px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 5 }}>
-            <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button className="hamburger" onClick={() => setSidebarOpen(s => !s)}>☰</button>
               <h1 style={{ fontFamily: "'Playfair Display',serif", fontSize: '1.3rem', fontWeight: 900 }}>
                 {activeSection === 'dashboard' && 'Dashboard Overview'}
                 {activeSection === 'bookings' && 'All Bookings'}
