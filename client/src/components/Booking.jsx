@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+
+// Production API URL
+if (process.env.NODE_ENV === 'production') {
+  axios.defaults.baseURL = 'https://barber-crown-apii.onrender.com';
+}
 import { useReveal } from '../hooks/useReveal';
 
 const services = [

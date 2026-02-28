@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
+// Production API URL
+if (process.env.NODE_ENV === 'production') {
+  axios.defaults.baseURL = 'https://barber-crown-apii.onrender.com';
+}
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const adminStyles = `
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Bebas+Neue&family=Montserrat:wght@300;400;500;600&display=swap');
