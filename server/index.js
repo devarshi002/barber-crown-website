@@ -290,32 +290,38 @@ app.delete('/api/bookings/:id', async (req, res) => {
   await col.deleteOne({ id: req.params.id });
 
   console.log(`\n🗑️  Cancelled: ${booking.name} — ${booking.service}`);
-  console.log(`   Client  : ${booking.email}`);
+  console.log(`   Email   : ${booking.email}`);
   console.log(`   Date    : ${booking.date} at ${booking.time}\n`);
 
-  // Send cancellation email to customer
-  if (booking.email) {
-    sendEmail(
-      booking.email,
-      `❌ Booking Cancelled — Blade & Crown`,
-      cancellationEmailHTML(booking)
-    ).catch(console.error);
-  }
+  // Send emails — await both so errors are visible in logs
+  try {
+    const emailPromises = [];
 
-  // Notify business owner too
-  if (process.env.BUSINESS_EMAIL) {
-    sendEmail(
-      process.env.BUSINESS_EMAIL,
-      `🗑️ Booking Cancelled: ${booking.name} — ${booking.service}`,
-      `<div style="font-family:sans-serif;padding:24px;">
-        <h2 style="color:#e06060;">Booking Cancelled</h2>
-        <p><b>Client:</b> ${booking.name} (${booking.email})</p>
-        <p><b>Service:</b> ${booking.service}</p>
-        <p><b>Date:</b> ${booking.date} at ${booking.time}</p>
-        <p><b>Barber:</b> ${booking.barber || 'No Preference'}</p>
-        <p style="color:#888;font-size:0.85rem;">Cancelled at: ${new Date().toLocaleString()}</p>
-      </div>`
-    ).catch(console.error);
+    if (booking.email) {
+      console.log(`📧 Sending cancellation email to: ${booking.email}`);
+      emailPromises.push(
+        sendEmail(booking.email, '❌ Booking Cancelled — Blade & Crown', cancellationEmailHTML(booking))
+      );
+    }
+
+    if (process.env.BUSINESS_EMAIL) {
+      const ownerHtml = '<div style="font-family:sans-serif;padding:24px;">'
+        + '<h2 style="color:#e06060;">🗑️ Booking Cancelled</h2>'
+        + '<p><b>Client:</b> ' + booking.name + ' (' + booking.email + ')</p>'
+        + '<p><b>Service:</b> ' + booking.service + '</p>'
+        + '<p><b>Barber:</b> ' + (booking.barber || 'No Preference') + '</p>'
+        + '<p><b>Date:</b> ' + booking.date + ' at ' + booking.time + '</p>'
+        + '<p style="color:#888;font-size:0.85rem;">Cancelled at: ' + new Date().toLocaleString() + '</p>'
+        + '</div>';
+      emailPromises.push(
+        sendEmail(process.env.BUSINESS_EMAIL, '🗑️ Booking Cancelled: ' + booking.name + ' — ' + booking.service, ownerHtml)
+      );
+    }
+
+    await Promise.all(emailPromises);
+    console.log('✅ Cancellation emails sent!');
+  } catch (err) {
+    console.error('❌ Cancellation email error:', err.message);
   }
 
   res.json({ success: true, message: 'Booking cancelled', id: req.params.id });
