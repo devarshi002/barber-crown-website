@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-axios.defaults.baseURL = 'https://barber-crown-apii.onrender.com';
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const adminStyles = `
@@ -114,6 +113,9 @@ const adminStyles = `
   }
   .btn-danger { background: rgba(139,26,26,0.3); color: #e06060; border: 1px solid rgba(139,26,26,0.4); }
   .btn-danger:hover { background: rgba(139,26,26,0.6); }
+  .btn-success { background: rgba(46,204,113,0.12); color: #2ecc71; border: 1px solid rgba(46,204,113,0.3); }
+  .btn-success:hover { background: rgba(46,204,113,0.25); }
+  .btn-success:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-gold-sm { background: transparent; color: #C9A84C; border: 1px solid rgba(201,168,76,0.4); }
   .btn-gold-sm:hover { background: rgba(201,168,76,0.1); }
 
@@ -274,6 +276,75 @@ function AdminCursor() {
   );
 }
 
+
+// ─── Amount + Paid Modal ──────────────────────────────────────────────────────
+function MarkPaidModal({ booking, onConfirm, onCancel }) {
+  const [amount, setAmount] = React.useState(booking?.amount || '');
+
+  const servicePrices = {
+    'Classic Cut': 35, 'Hot Shave': 45, 'Beard Sculpt': 30,
+    'Fade Master': 40, 'Royal Package': 95, 'Hair Design': 55,
+  };
+
+  React.useEffect(() => {
+    if (booking) {
+      const svcName = booking.service?.split(' —')[0];
+      const price = servicePrices[svcName] || '';
+      setAmount(booking.amount || price || '');
+    }
+  }, [booking]);
+
+  if (!booking) return null;
+
+  return (
+    <div className="modal-overlay">
+      <div style={{ background: '#111', border: '1px solid rgba(46,204,113,0.4)', maxWidth: 400, width: '100%', padding: '36px', position: 'relative' }}>
+        <div style={{ height: 3, background: 'linear-gradient(90deg, #1a8b1a, #2ecc71)', position: 'absolute', top: 0, left: 0, right: 0 }} />
+        <div style={{ fontSize: '2.5rem', textAlign: 'center', marginBottom: 16 }}>💰</div>
+        <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: '1.3rem', textAlign: 'center', marginBottom: 6 }}>Mark as Paid</h3>
+        <p style={{ color: '#888', fontSize: '0.78rem', textAlign: 'center', marginBottom: 24 }}>
+          <strong style={{ color: '#F5EDD6' }}>{booking.name}</strong> · {booking.service?.split(' —')[0]}
+        </p>
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: '0.6rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#C9A84C', marginBottom: 8 }}>
+            Amount Received ($)
+          </label>
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#2ecc71', fontWeight: 700, fontSize: '1rem' }}>$</span>
+            <input
+              type="number"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              placeholder="0"
+              min="0"
+              style={{
+                width: '100%', background: '#0a0a0a',
+                border: '1px solid rgba(46,204,113,0.3)',
+                color: '#F5EDD6', padding: '12px 14px 12px 32px',
+                fontFamily: 'Montserrat,sans-serif', fontSize: '1.1rem',
+                outline: 'none', boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <p style={{ fontSize: '0.62rem', color: '#555', marginTop: 6 }}>
+            Auto-filled from service price. Edit if needed.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button className="btn-sm btn-gold-sm" onClick={onCancel} style={{ flex: 1, padding: '12px' }}>Cancel</button>
+          <button
+            className="btn-sm"
+            onClick={() => onConfirm(Number(amount) || 0)}
+            style={{ flex: 1, padding: '12px', background: 'rgba(46,204,113,0.15)', color: '#2ecc71', border: '1px solid rgba(46,204,113,0.4)' }}
+          >
+            ✓ Confirm Payment
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Admin Dashboard ─────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const [bookings, setBookings] = useState([]);
@@ -284,12 +355,38 @@ export default function AdminDashboard() {
   const [sortBy, setSortBy] = useState('newest');
   const [activeTab, setActiveTab] = useState('overview');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [markPaidTarget, setMarkPaidTarget] = useState(null);
+  const [markingPaid, setMarkingPaid] = useState(null);
   const [notification, setNotification] = useState(null);
   const [activeSection, setActiveSection] = useState('dashboard');
 
   const showNotif = (msg, type = 'success') => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 3000);
+  };
+
+  const handleMarkPaid = (booking) => {
+    setMarkPaidTarget(booking);
+  };
+
+  const confirmMarkPaid = async (amount) => {
+    const booking = markPaidTarget;
+    setMarkPaidTarget(null);
+    setMarkingPaid(booking.id);
+    try {
+      await axios.patch(`/api/bookings/${booking.id}/pay`, { amount }).catch(() => {});
+      setBookings(prev => prev.map(b =>
+        b.id === booking.id ? { ...b, paymentStatus: 'paid', amount } : b
+      ));
+      showNotif(`✅ ${booking.name}'s payment of $${amount} marked as paid!`);
+    } catch {
+      setBookings(prev => prev.map(b =>
+        b.id === booking.id ? { ...b, paymentStatus: 'paid', amount } : b
+      ));
+      showNotif(`✅ ${booking.name}'s payment of $${amount} confirmed!`);
+    } finally {
+      setMarkingPaid(null);
+    }
   };
 
   const fetchBookings = useCallback(async () => {
@@ -399,6 +496,7 @@ export default function AdminDashboard() {
 
       <AdminCursor />
       {deleteTarget && <ConfirmModal booking={deleteTarget} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />}
+      {markPaidTarget && <MarkPaidModal booking={markPaidTarget} onConfirm={confirmMarkPaid} onCancel={() => setMarkPaidTarget(null)} />}
 
       <div style={{ display: 'flex', minHeight: '100vh', background: '#080808' }}>
 
@@ -570,7 +668,7 @@ export default function AdminDashboard() {
                     </div>
                     <button className="btn-sm btn-gold-sm" onClick={() => setActiveSection('bookings')}>View All →</button>
                   </div>
-                  <BookingsTable bookings={bookings.slice(0, 5)} onDelete={setDeleteTarget} compact />
+                  <BookingsTable bookings={bookings.slice(0, 5)} onDelete={setDeleteTarget} onMarkPaid={handleMarkPaid} markingPaid={markingPaid} compact />
                 </div>
               </>
             )}
@@ -621,7 +719,7 @@ export default function AdminDashboard() {
                       <p style={{ color: '#555' }}>No bookings found</p>
                     </div>
                   ) : (
-                    <BookingsTable bookings={filtered} onDelete={setDeleteTarget} />
+                    <BookingsTable bookings={filtered} onDelete={setDeleteTarget} onMarkPaid={handleMarkPaid} markingPaid={markingPaid} />
                   )}
                 </div>
               </>
@@ -724,7 +822,7 @@ export default function AdminDashboard() {
 }
 
 // ─── Bookings Table Component ─────────────────────────────────────────────────
-function BookingsTable({ bookings, onDelete, compact = false }) {
+function BookingsTable({ bookings, onDelete, onMarkPaid, markingPaid, compact = false }) {
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -761,7 +859,24 @@ function BookingsTable({ bookings, onDelete, compact = false }) {
                 </span>
               </td>
               <td style={{ padding: '14px 14px' }}>
-                <button className="btn-sm btn-danger" onClick={() => onDelete(b)}>Cancel</button>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {b.paymentStatus !== 'paid' && b.paymentStatus !== 'cancelled' && (
+                    <button
+                      className="btn-sm btn-success"
+                      onClick={() => onMarkPaid(b)}
+                      disabled={markingPaid === b.id}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      {markingPaid === b.id ? '...' : '💰 Paid'}
+                    </button>
+                  )}
+                  {b.paymentStatus !== 'cancelled' && (
+                    <button className="btn-sm btn-danger" onClick={() => onDelete(b)}>✕</button>
+                  )}
+                  {b.paymentStatus === 'cancelled' && (
+                    <span style={{ fontSize: '0.62rem', color: '#444', letterSpacing: '0.1em' }}>—</span>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

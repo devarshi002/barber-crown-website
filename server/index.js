@@ -225,9 +225,10 @@ app.patch('/api/bookings/:id/pay', async (req, res) => {
   if (booking.paymentStatus === 'paid') return res.status(400).json({ success: false, message: 'Already marked as paid' });
 
   const paidAt = new Date().toISOString();
-  await col.updateOne({ id: req.params.id }, { $set: { paymentStatus: 'paid', paidAt } });
+  const amount = req.body.amount !== undefined ? Number(req.body.amount) : booking.amount;
+  await col.updateOne({ id: req.params.id }, { $set: { paymentStatus: 'paid', paidAt, amount } });
 
-  const updated = { ...booking, paymentStatus: 'paid', paidAt };
+  const updated = { ...booking, paymentStatus: 'paid', paidAt, amount };
 
   console.log(`\n💰 Payment Marked!`);
   console.log(`   Client  : ${booking.name}`);
