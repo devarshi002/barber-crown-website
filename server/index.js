@@ -42,43 +42,32 @@ function requireAuth(req, res, next) {
   }
 }
 
-// ─── Send OTP via Fast2SMS ────────────────────────────────────────────────────
-async function sendOTP(mobile, otp) {
-  const https = require('https');
-  const message = `Your Blade & Crown Admin OTP is: ${otp}. Valid for 5 minutes. Do not share.`;
-  const params = new URLSearchParams({
-    route: 'q',
-    message,
-    numbers: mobile,
-    flash: '0',
-  });
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'www.fast2sms.com',
-      path: `/dev/bulkV2?${params}`,
-      method: 'GET',
-      headers: {
-        authorization: process.env.FAST2SMS_API_KEY,
-      },
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (json.return === true) {
-            console.log(`✅ OTP sent to +91${mobile}`);
-            resolve(json);
-          } else {
-            console.error('❌ Fast2SMS error:', json);
-            reject(new Error(JSON.stringify(json)));
-          }
-        } catch (e) { reject(e); }
-      });
-    });
-    req.on('error', reject);
-    req.end();
-  });
+// ─── Send OTP via Email ──────────────────────────────────────────────────────
+async function sendOTPEmail(otp) {
+  const to = process.env.ADMIN_EMAIL || process.env.BUSINESS_EMAIL;
+  const html = `<div style="font-family:'Segoe UI',sans-serif;background:#0A0A0A;color:#F5EDD6;padding:40px;max-width:500px;margin:0 auto;">
+    <div style="text-align:center;border-bottom:1px solid rgba(201,168,76,0.3);padding-bottom:24px;margin-bottom:28px;">
+      <h1 style="font-size:1.6rem;letter-spacing:0.15em;color:#C9A84C;margin:0;">BLADE & CROWN</h1>
+      <p style="color:#888;font-size:0.7rem;letter-spacing:0.2em;margin-top:6px;">ADMIN PORTAL</p>
+    </div>
+    <div style="text-align:center;margin-bottom:28px;">
+      <div style="font-size:2.5rem;margin-bottom:12px;">🔐</div>
+      <h2 style="color:#F5EDD6;font-size:1.1rem;margin-bottom:6px;">Your Admin OTP</h2>
+      <p style="color:#888;font-size:0.8rem;">Valid for 5 minutes only. Do not share.</p>
+    </div>
+    <div style="background:#1A1A1A;border:2px solid rgba(201,168,76,0.4);padding:28px;text-align:center;margin-bottom:24px;">
+      <div style="font-size:2.8rem;font-weight:900;letter-spacing:0.4em;color:#C9A84C;font-family:monospace;">${otp}</div>
+    </div>
+    <p style="color:#555;font-size:0.7rem;text-align:center;line-height:1.7;">
+      If you did not request this OTP, please ignore this email.<br>
+      Someone may be trying to access your admin panel.
+    </p>
+    <div style="text-align:center;margin-top:24px;padding-top:20px;border-top:1px solid rgba(201,168,76,0.1);">
+      <p style="color:#333;font-size:0.65rem;letter-spacing:0.1em;">© ${new Date().getFullYear()} BLADE & CROWN · SECURE ACCESS</p>
+    </div>
+  </div>`;
+  await sendEmail(to, '🔐 Blade & Crown Admin OTP — ' + otp, html);
+  console.log(`✅ OTP email sent to ${to}`);
 }
 
 app.use(helmet());
@@ -250,35 +239,32 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   const otp = crypto.randomInt(100000, 999999).toString();
-  const mobile = process.env.ADMIN_MOBILE;
-  otpStore[mobile] = { otp, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 };
-  console.log(`🔐 Login OK for ${username} → OTP: ${otp} → sending to +91${mobile}`);
+  otpStore['admin'] = { otp, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 };
+  console.log(`🔐 Login OK for ${username} → sending OTP via email`);
 
   try {
-    await sendOTP(mobile, otp);
-    res.json({ success: true, message: 'OTP sent to your registered mobile number' });
+    await sendOTPEmail(otp);
+    res.json({ success: true, message: 'OTP sent to your registered email address' });
   } catch (err) {
-    console.error('❌ OTP failed:', err.message);
-    // Dev fallback — show OTP in response
-    res.json({ success: true, message: 'OTP send failed — check logs', devOtp: otp });
+    console.error('❌ OTP email failed:', err.message);
+    res.status(500).json({ success: false, message: 'Failed to send OTP. Please try again.' });
   }
 });
 
 // Step 2: Verify OTP → JWT Token
 app.post('/api/auth/verify-otp', (req, res) => {
   const { otp } = req.body;
-  const mobile = process.env.ADMIN_MOBILE;
-  const record = otpStore[mobile];
+  const record = otpStore['admin'];
 
   if (!record) return res.status(400).json({ success: false, message: 'No OTP requested. Please login first.' });
   if (Date.now() > record.expiresAt) {
-    delete otpStore[mobile];
+    delete otpStore['admin'];
     return res.status(400).json({ success: false, message: 'OTP expired. Please login again.' });
   }
 
   record.attempts++;
   if (record.attempts > 5) {
-    delete otpStore[mobile];
+    delete otpStore['admin'];
     return res.status(429).json({ success: false, message: 'Too many attempts. Please login again.' });
   }
 
@@ -286,7 +272,7 @@ app.post('/api/auth/verify-otp', (req, res) => {
     return res.status(401).json({ success: false, message: `Invalid OTP. ${5 - record.attempts} attempts remaining.` });
   }
 
-  delete otpStore[mobile];
+  delete otpStore['admin'];
   const token = jwt.sign(
     { username: process.env.ADMIN_USERNAME, role: 'admin' },
     process.env.JWT_SECRET || 'bladecrown2026supersecretkey',

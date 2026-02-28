@@ -148,7 +148,7 @@ function AdminLogin({ onLogin }) {
           ) : (
             <form onSubmit={handleOTP}>
               <h2 style={{ fontSize:'1rem', fontWeight:700, letterSpacing:'0.1em', color:'#F5EDD6', margin:'0 0 6px', textAlign:'center' }}>VERIFY OTP</h2>
-              <p style={{ fontSize:'0.68rem', color:'#555', textAlign:'center', marginBottom:6 }}>6-digit OTP sent to your registered mobile</p>
+              <p style={{ fontSize:'0.68rem', color:'#555', textAlign:'center', marginBottom:6 }}>6-digit OTP sent to your registered email</p>
               <p style={{ fontSize:'0.72rem', color: timer < 60 ? '#e06060' : '#C9A84C', textAlign:'center', marginBottom:24, fontWeight:700 }}>
                 ⏱ Expires in {fmt(timer)}
               </p>
