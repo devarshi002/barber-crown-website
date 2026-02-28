@@ -574,11 +574,15 @@ export default function AdminApp() {
 
   React.useEffect(() => {
     const token = getToken();
-    if (!token) { setChecking(false); return; }
+    if (!token) { setChecking(false); setIsLoggedIn(false); return; }
     axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     axios.get('/api/auth/verify')
       .then(() => setIsLoggedIn(true))
-      .catch(() => { clearToken(); setIsLoggedIn(false); })
+      .catch(() => {
+        clearToken();
+        delete axios.defaults.headers.common['Authorization'];
+        setIsLoggedIn(false);
+      })
       .finally(() => setChecking(false));
   }, []);
 
@@ -820,6 +824,17 @@ function AdminDashboard({ onLogout }) {
               <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg, #8B1A1A, #C9A84C)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 700 }}>
                 A
               </div>
+              <button
+                onClick={async () => {
+                  try { await axios.post('/api/auth/logout'); } catch {}
+                  clearToken();
+                  delete axios.defaults.headers.common['Authorization'];
+                  onLogout();
+                }}
+                style={{ background:'rgba(139,26,26,0.15)',border:'1px solid rgba(139,26,26,0.4)',color:'#e06060',padding:'7px 14px',fontSize:'0.6rem',letterSpacing:'0.15em',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontWeight:600 }}
+              >
+                🚪 LOGOUT
+              </button>
             </div>
           </div>
 
